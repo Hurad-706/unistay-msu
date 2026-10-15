@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import AppLayout from '../components/layout/AppLayout.vue';
+import InvoiceLedger from '../components/billing/InvoiceLedger.vue';
 import { useBillingStore } from '../stores/billing';
 import { useNetworkStore } from '../stores/network';
-import { Invoice, Payment } from '../types';
+import { Invoice } from '../types';
 import {
   Calculator,
-  CheckCircle2,
-  Clock,
   CreditCard,
-  Download,
   Droplet,
-  Printer,
   Zap,
 } from 'lucide-vue-next';
+
+interface UtilitySplitResult {
+  electricShare: number;
+  waterShare: number;
+  totalUtilityShare: number;
+}
 
 const billingStore = useBillingStore();
 const networkStore = useNetworkStore();
@@ -21,7 +24,8 @@ const networkStore = useNetworkStore();
 const electricBill = ref(3600);
 const waterBill = ref(1200);
 const occupants = ref(8);
-const splitResult = ref<any>(null);
+const splitResult = ref<UtilitySplitResult | null>(null);
+const splitError = ref<string | null>(null);
 const selectedInvoiceId = ref('');
 const paymentAmount = ref(0);
 const paymentMethod = ref<'cash' | 'gcash' | 'bank_transfer'>('gcash');
@@ -38,8 +42,8 @@ const selectedBalance = computed(() =>
 );
 
 onMounted(() => {
-  billingStore.fetchInvoices();
-  calculateSplit();
+  void billingStore.fetchInvoices();
+  void calculateSplit();
 });
 
 watch(selectedInvoiceId, () => {
@@ -47,11 +51,18 @@ watch(selectedInvoiceId, () => {
 });
 
 async function calculateSplit() {
-  splitResult.value = await billingStore.calculateUtilitySplit(
-    electricBill.value,
-    waterBill.value,
-    occupants.value,
-  );
+  splitError.value = null;
+  try {
+    splitResult.value = await billingStore.calculateUtilitySplit(
+      electricBill.value,
+      waterBill.value,
+      occupants.value,
+    );
+  } catch (error) {
+    splitResult.value = null;
+    splitError.value =
+      error instanceof Error ? error.message : 'Unable to calculate the utility split.';
+  }
 }
 
 async function handlePayment() {
@@ -85,83 +96,8 @@ function formatMoney(value: number | string) {
   });
 }
 
-function formatDate(value: string | Date) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? String(value)
-    : date.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
 function outstandingBalance(invoice: Invoice) {
   return Math.max(0, Number(invoice.totalAmount) - Number(invoice.paidAmount));
-}
-
-function statusClass(status: Invoice['status']) {
-  if (status === 'paid') return 'bg-emerald-100 text-emerald-800';
-  if (status === 'partially_paid') return 'bg-amber-100 text-amber-800';
-  if (status === 'overdue') return 'bg-red-100 text-red-800';
-  return 'bg-slate-100 text-slate-700';
-}
-
-function csvCell(value: unknown) {
-  const text = String(value ?? '');
-  const safeText = /^[\s]*[=+\-@]/.test(text) ? `'${text}` : text;
-  return `"${safeText.replace(/"/g, '""')}"`;
-}
-
-function downloadLedger() {
-  const headers = [
-    'Invoice number',
-    'Property',
-    'Unit',
-    'Rent',
-    'Electricity',
-    'Water',
-    'Other fees',
-    'Total charges',
-    'Total paid',
-    'Outstanding balance',
-    'Invoice status',
-    'Due date',
-    'Payment date',
-    'Payment amount',
-    'Payment method',
-    'Payment status',
-    'Receipt',
-  ];
-  const rows = billingStore.invoices.flatMap((invoice: Invoice) => {
-    const payments: Array<Payment | undefined> = invoice.payments?.length ? invoice.payments : [undefined];
-    return payments.map((payment: Payment | undefined) => [
-      invoice.invoiceNumber,
-      invoice.property?.name,
-      invoice.unit?.roomNumber,
-      invoice.rentAmount,
-      invoice.electricityAmount,
-      invoice.waterAmount,
-      invoice.otherFees,
-      invoice.totalAmount,
-      invoice.paidAmount,
-      outstandingBalance(invoice),
-      invoice.status.replace('_', ' '),
-      formatDate(invoice.dueDate),
-      payment ? formatDate(payment.paymentDate) : '',
-      payment?.amount,
-      payment?.paymentMethod?.replace('_', ' '),
-      payment ? (payment.isSynced ? 'Confirmed' : 'Awaiting sync') : '',
-      payment?.receiptUrl,
-    ]);
-  });
-  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'unistay-rent-payment-ledger.csv';
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function printLedger() {
-  window.print();
 }
 </script>
 
@@ -201,6 +137,7 @@ function printLedger() {
                 Electricity: ₱{{ formatMoney(splitResult.electricShare) }} + Water: ₱{{ formatMoney(splitResult.waterShare) }}
               </div>
             </div>
+            <p v-if="splitError" role="alert" class="text-red-700">{{ splitError }}</p>
           </div>
         </section>
 
@@ -257,120 +194,7 @@ function printLedger() {
         </section>
       </div>
 
-      <section id="rent-ledger" class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
-          <div>
-            <h2 class="text-sm font-bold text-slate-800">Monthly Invoices & Payment Ledger</h2>
-            <p class="mt-1 text-xs text-slate-500">Paid and outstanding balances with recorded payment details.</p>
-          </div>
-          <div class="print-hidden flex gap-2">
-            <button @click="downloadLedger" :disabled="billingStore.invoices.length === 0" class="inline-flex items-center gap-1.5 rounded border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <Download class="h-3.5 w-3.5" />Download CSV
-            </button>
-            <button @click="printLedger" :disabled="billingStore.invoices.length === 0" class="inline-flex items-center gap-1.5 rounded border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <Printer class="h-3.5 w-3.5" />Print
-            </button>
-          </div>
-        </div>
-
-        <div v-if="billingStore.loadError" role="alert" class="border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs text-amber-800">
-          {{ billingStore.loadError }}
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[1180px] text-left text-xs">
-            <thead class="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-500">
-              <tr>
-                <th class="px-4 py-3">Invoice / Unit</th>
-                <th class="px-4 py-3">Monthly charges</th>
-                <th class="px-4 py-3">Total</th>
-                <th class="px-4 py-3">Paid</th>
-                <th class="px-4 py-3">Outstanding</th>
-                <th class="px-4 py-3">Status</th>
-                <th class="px-4 py-3">Due date</th>
-                <th class="px-4 py-3">Payment history</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              <tr v-if="billingStore.loading">
-                <td colspan="8" class="px-5 py-8 text-center text-slate-500">Loading billing records…</td>
-              </tr>
-              <tr v-else-if="billingStore.invoices.length === 0">
-                <td colspan="8" class="px-5 py-8 text-center text-slate-400">No billing records found.</td>
-              </tr>
-              <tr v-for="invoice in billingStore.invoices" :key="invoice.id" class="align-top hover:bg-slate-50">
-                <td class="px-4 py-3">
-                  <div class="font-semibold text-slate-800">{{ invoice.invoiceNumber }}</div>
-                  <div class="mt-1 text-slate-500">{{ invoice.property?.name || 'Property' }}</div>
-                  <div class="text-slate-500">Unit {{ invoice.unit?.roomNumber || '—' }}</div>
-                </td>
-                <td class="px-4 py-3 text-slate-600">
-                  <div>Rent: ₱{{ formatMoney(invoice.rentAmount) }}</div>
-                  <div>Electricity: ₱{{ formatMoney(invoice.electricityAmount) }}</div>
-                  <div>Water: ₱{{ formatMoney(invoice.waterAmount) }}</div>
-                  <div>Other: ₱{{ formatMoney(invoice.otherFees) }}</div>
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 font-bold text-slate-900">₱{{ formatMoney(invoice.totalAmount) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-emerald-700">₱{{ formatMoney(invoice.paidAmount) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">₱{{ formatMoney(outstandingBalance(invoice)) }}</td>
-                <td class="px-4 py-3">
-                  <span :class="[statusClass(invoice.status), 'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider']">
-                    {{ invoice.status.replace('_', ' ') }}
-                  </span>
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 text-slate-500">{{ formatDate(invoice.dueDate) }}</td>
-                <td class="px-4 py-3">
-                  <ul v-if="invoice.payments?.length" class="space-y-2">
-                    <li v-for="payment in invoice.payments" :key="payment.id" class="min-w-44 border-b border-slate-100 pb-2 last:border-0">
-                      <div class="flex items-center gap-1.5 font-semibold text-slate-700">
-                        <CheckCircle2 v-if="payment.isSynced" class="h-3.5 w-3.5 text-emerald-600" />
-                        <Clock v-else class="h-3.5 w-3.5 text-amber-600" />
-                        ₱{{ formatMoney(payment.amount) }} · {{ formatDate(payment.paymentDate) }}
-                      </div>
-                      <div class="mt-0.5 text-slate-500">
-                        {{ payment.paymentMethod.replace('_', ' ') }} · {{ payment.isSynced ? 'Confirmed' : 'Awaiting sync' }}
-                      </div>
-                      <a v-if="payment.receiptUrl" :href="payment.receiptUrl" target="_blank" rel="noopener noreferrer" class="mt-0.5 inline-block text-msu-maroon underline">View receipt</a>
-                    </li>
-                  </ul>
-                  <span v-else class="text-slate-400">No payments recorded</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <InvoiceLedger />
     </div>
   </AppLayout>
 </template>
-
-<style>
-@media print {
-  body * {
-    visibility: hidden !important;
-  }
-
-  #rent-ledger,
-  #rent-ledger * {
-    visibility: visible !important;
-  }
-
-  #rent-ledger {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    overflow: visible !important;
-    border: 0 !important;
-    box-shadow: none !important;
-  }
-
-  #rent-ledger .print-hidden {
-    display: none !important;
-  }
-
-  #rent-ledger table {
-    min-width: 0 !important;
-    font-size: 9pt;
-  }
-}
-</style>
