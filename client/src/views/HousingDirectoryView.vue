@@ -2,15 +2,27 @@
 import { ref, onMounted } from 'vue';
 import AppLayout from '../components/layout/AppLayout.vue';
 import { useHousingStore } from '../stores/housing';
-import { Search, MapPin, CheckCircle2, Building, ShieldCheck } from 'lucide-vue-next';
+import { Search, MapPin, Building, ShieldCheck, CheckCircle } from 'lucide-vue-next';
 
 const housingStore = useHousingStore();
 const searchQuery = ref('');
 const filterType = ref('');
+const statusFilter = ref('');
 
 onMounted(() => {
   housingStore.fetchProperties();
 });
+
+// Handle property approval action
+const handleApprove = async (id: string) => {
+  if (housingStore.approveProperty) {
+    await housingStore.approveProperty(id);
+  } else {
+    // Fallback if store action isn't defined yet: toggle status locally
+    const prop = housingStore.properties.find((p: any) => p.id === id);
+    if (prop) prop.isAccredited = true;
+  }
+};
 </script>
 
 <template>
@@ -52,7 +64,6 @@ onMounted(() => {
       </div>
 
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <!-- Default Starter Card if empty -->
         <div
           v-if="housingStore.properties.length === 0"
           class="col-span-full bg-white p-8 rounded-xl border border-slate-200 text-center"
@@ -74,7 +85,13 @@ onMounted(() => {
               class="absolute top-3 right-3 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center space-x-1"
             >
               <ShieldCheck class="w-3 h-3 mr-0.5" />
-              Accredited
+              Accredited / Published
+            </span>
+            <span
+              v-else
+              class="absolute top-3 right-3 bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            >
+              Pending Approval
             </span>
           </div>
 
@@ -109,12 +126,23 @@ onMounted(() => {
                   ₱{{ prop.minMonthlyRate }} - ₱{{ prop.maxMonthlyRate }}
                 </div>
               </div>
-              <button
-                @click="housingStore.submitApplication(prop.id)"
-                class="bg-msu-maroon text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-msu-darkmaroon transition-colors"
-              >
-                Apply Now
-              </button>
+              <div class="flex gap-2">
+                <!-- Approve Button for Managers -->
+                <button
+                  v-if="!prop.isAccredited"
+                  @click="handleApprove(prop.id)"
+                  class="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1"
+                >
+                  <CheckCircle class="w-3.5 h-3.5" /> Approve
+                </button>
+                
+                <button
+                  @click="housingStore.submitApplication(prop.id)"
+                  class="bg-msu-maroon text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-msu-darkmaroon transition-colors"
+                >
+                  Apply Now
+                </button>
+              </div>
             </div>
           </div>
         </div>
