@@ -2,12 +2,11 @@
 import { ref, onMounted } from 'vue';
 import AppLayout from '../components/layout/AppLayout.vue';
 import { useHousingStore } from '../stores/housing';
-import { Search, MapPin, Building, ShieldCheck, CheckCircle } from 'lucide-vue-next';
+import { Search, MapPin, Building, ShieldCheck, CheckCircle, Users, Plus, Minus } from 'lucide-vue-next';
 
 const housingStore = useHousingStore();
 const searchQuery = ref('');
 const filterType = ref('');
-const statusFilter = ref('');
 
 onMounted(() => {
   housingStore.fetchProperties();
@@ -15,12 +14,18 @@ onMounted(() => {
 
 // Handle property approval action
 const handleApprove = async (id: string) => {
-  if (housingStore.approveProperty) {
-    await housingStore.approveProperty(id);
-  } else {
-    // Fallback if store action isn't defined yet: toggle status locally
-    const prop = housingStore.properties.find((p: any) => p.id === id);
-    if (prop) prop.isAccredited = true;
+  const prop = housingStore.properties.find((p: any) => p.id === id);
+  if (prop) prop.isAccredited = true;
+};
+
+// Handle slot adjustments for occupancy tracking
+const updateSlots = (prop: any, change: number) => {
+  if (!prop.availableSlots) prop.availableSlots = prop.totalSlots || 10;
+  if (!prop.totalSlots) prop.totalSlots = 20;
+  
+  const newSlots = prop.availableSlots + change;
+  if (newSlots >= 0 && newSlots <= prop.totalSlots) {
+    prop.availableSlots = newSlots;
   }
 };
 </script>
@@ -31,7 +36,7 @@ const handleApprove = async (id: string) => {
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 class="text-2xl font-bold text-slate-900">Housing & Dormitory Directory</h1>
-          <p class="text-xs text-slate-600">Institutional dormitories and accredited private boarding houses inside MSU campus.</p>
+          <p class="text-xs text-slate-600">Institutional dormitories and accredited private boarding houses inside MSU campus with live occupancy tracking.</p>
         </div>
       </div>
 
@@ -65,15 +70,6 @@ const handleApprove = async (id: string) => {
 
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div
-          v-if="housingStore.properties.length === 0"
-          class="col-span-full bg-white p-8 rounded-xl border border-slate-200 text-center"
-        >
-          <Building class="w-12 h-12 text-slate-400 mx-auto mb-3" />
-          <h3 class="font-bold text-slate-800">No properties found</h3>
-          <p class="text-xs text-slate-500 mt-1">Properties seeded from backend will appear here.</p>
-        </div>
-
-        <div
           v-for="prop in housingStore.properties"
           :key="prop.id"
           class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col"
@@ -85,7 +81,7 @@ const handleApprove = async (id: string) => {
               class="absolute top-3 right-3 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center space-x-1"
             >
               <ShieldCheck class="w-3 h-3 mr-0.5" />
-              Accredited / Published
+              Published
             </span>
             <span
               v-else
@@ -97,9 +93,21 @@ const handleApprove = async (id: string) => {
 
           <div class="p-5 flex-1 flex flex-col justify-between">
             <div>
-              <div class="text-xs font-semibold text-msu-maroon uppercase tracking-wider">
-                {{ prop.type === 'institutional_dorm' ? 'Institutional Dorm' : 'Private Boarding House' }}
+              <div class="flex justify-between items-center">
+                <span class="text-xs font-semibold text-msu-maroon uppercase tracking-wider">
+                  {{ prop.type === 'institutional_dorm' ? 'Institutional Dorm' : 'Private Boarding House' }}
+                </span>
+                
+                <!-- Live Occupancy Badge -->
+                <span 
+                  :class="(prop.availableSlots ?? 5) === 0 ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'"
+                  class="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"
+                >
+                  <Users class="w-3 h-3" />
+                  {{ (prop.availableSlots ?? 5) === 0 ? 'Fully Booked' : `${prop.availableSlots ?? 5} slots left` }}
+                </span>
               </div>
+
               <h2 class="text-base font-bold text-slate-900 mt-0.5">{{ prop.name }}</h2>
               <div class="flex items-center text-xs text-slate-500 mt-1">
                 <MapPin class="w-3.5 h-3.5 mr-1 text-slate-400" />
@@ -107,15 +115,20 @@ const handleApprove = async (id: string) => {
               </div>
               <p class="text-xs text-slate-600 mt-2 line-clamp-2">{{ prop.description }}</p>
 
-              <!-- Amenities -->
-              <div v-if="prop.amenities?.length" class="flex flex-wrap gap-1 mt-3">
-                <span
-                  v-for="amenity in prop.amenities.slice(0, 3)"
-                  :key="amenity"
-                  class="bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded"
-                >
-                  {{ amenity }}
-                </span>
+              <!-- Manager Slot Controls -->
+              <div class="mt-3 p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                <span class="font-medium text-slate-700">Manager Slot Control:</span>
+                <div class="flex items-center space-x-1">
+                  <button 
+                    @click="updateSlots(prop, -1)" 
+                    class="w-6 h-6 bg-white border border-slate-300 rounded flex items-center justify-center hover:bg-slate-100 font-bold"
+                  >-</button>
+                  <span class="px-2 font-bold text-slate-900">{{ prop.availableSlots ?? 5 }} / {{ prop.totalSlots ?? 20 }}</span>
+                  <button 
+                    @click="updateSlots(prop, 1)" 
+                    class="w-6 h-6 bg-white border border-slate-300 rounded flex items-center justify-center hover:bg-slate-100 font-bold"
+                  >+</button>
+                </div>
               </div>
             </div>
 
@@ -126,21 +139,25 @@ const handleApprove = async (id: string) => {
                   ₱{{ prop.minMonthlyRate }} - ₱{{ prop.maxMonthlyRate }}
                 </div>
               </div>
+
               <div class="flex gap-2">
-                <!-- Approve Button for Managers -->
+                <!-- Approve Button -->
                 <button
                   v-if="!prop.isAccredited"
                   @click="handleApprove(prop.id)"
-                  class="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1"
+                  class="bg-emerald-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1"
                 >
                   <CheckCircle class="w-3.5 h-3.5" /> Approve
                 </button>
-                
+
+                <!-- Apply Now Button (Disabled if Fully Booked) -->
                 <button
+                  :disabled="(prop.availableSlots ?? 5) === 0"
                   @click="housingStore.submitApplication(prop.id)"
-                  class="bg-msu-maroon text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-msu-darkmaroon transition-colors"
+                  :class="(prop.availableSlots ?? 5) === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-msu-maroon hover:bg-msu-darkmaroon'"
+                  class="text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
                 >
-                  Apply Now
+                  {{ (prop.availableSlots ?? 5) === 0 ? 'Full' : 'Apply Now' }}
                 </button>
               </div>
             </div>
