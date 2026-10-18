@@ -1,6 +1,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import AppLayout from '../components/layout/AppLayout.vue';
 import {
   Search,
   FileText,
@@ -131,7 +132,8 @@ function statusLabel(status: ReviewStatus) {
 </script>
 
 <template>
-  <section class="space-y-6">
+  <AppLayout>
+    <section class="space-y-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <p class="text-sm font-semibold text-msu-maroon">HOUSING MANAGEMENT</p>
@@ -358,5 +360,6 @@ function statusLabel(status: ReviewStatus) {
         </div>
       </div>
     </div>
-  </section>
+    </section>
+  </AppLayout>
 </template>
