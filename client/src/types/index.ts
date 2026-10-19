@@ -32,6 +32,8 @@ export interface Property {
   minMonthlyRate: number;
   maxMonthlyRate: number;
   isAccredited: boolean;
+  availableSlots?: number;
+  totalSlots?: number;
   units?: Unit[];
 }
 
@@ -44,6 +46,35 @@ export interface Application {
   status: ApplicationStatus;
   remarks?: string;
   createdAt: string;
+}
+
+export interface HousingApplicationDraft {
+  id: string;
+  studentId: string;
+  fullName: string;
+  studentNumber: string;
+  email: string;
+  contactNumber: string;
+  sex: string;
+  dateOfBirth: string;
+  religion: string;
+  homeAddress: string;
+  city: string;
+  province: string;
+  emergencyContactName: string;
+  emergencyContactNumber: string;
+  emergencyContactRelationship: string;
+  university: string;
+  college: string;
+  degreeProgram: string;
+  yearLevel: string;
+  academicYear: string;
+  semester: string;
+  housingType: PropertyType | '';
+  propertyId: string;
+  roomType: string;
+  otherPreferences: string;
+  updatedAt: string;
 }
 
 export type InvoiceStatus = 'unpaid' | 'partially_paid' | 'paid' | 'overdue';

@@ -3,6 +3,7 @@ import { useRoute } from 'vue-router';
 import {
   LayoutDashboard,
   Building2,
+  ClipboardList,
   Receipt,
   Wrench,
   CalendarDays,
@@ -14,6 +15,7 @@ const route = useRoute();
 const navigation = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Housing Directory', path: '/housing', icon: Building2 },
+  { name: 'Housing Application', path: '/housing/apply', icon: ClipboardList },
   { name: 'Billing & Utilities', path: '/billing', icon: Receipt },
   { name: 'Maintenance Desk', path: '/maintenance', icon: Wrench },
   { name: 'Facility Bookings', path: '/facilities', icon: CalendarDays },
