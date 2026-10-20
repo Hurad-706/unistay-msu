@@ -1,7 +1,6 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import { Invoice, InvoiceStatus, Payment } from './entities/invoice.entity';
 import { CreateInvoiceDto, RecordPaymentDto } from './dto/billing.dto';
 import { UsersService } from '../users/users.service';
@@ -159,28 +158,57 @@ export class BillingService {
 
   // Financial summary aggregation
   async getFinancialSummary(query: FinanceSummaryQueryDto): Promise<FinanceSummaryResponseDto> {
-    const { propertyId, startDate, endDate } = query;
+    const { propertyId, startDate, endDate, status } = query;
     const start = startDate ? new Date(startDate) : undefined;
     const end = endDate ? new Date(endDate) : undefined;
+    if (end && endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      end.setUTCHours(23, 59, 59, 999);
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
 
-    // Total collected: sum of payments
+    const applyStatusFilter = <T extends ObjectLiteral>(qb: SelectQueryBuilder<T>) => {
+      if (!status || status === 'all') return;
+      const balance = '(invoice.totalAmount - COALESCE(invoice.paidAmount, 0))';
+      switch (status) {
+        case InvoiceStatus.PAID:
+          qb.andWhere(`${balance} <= 0`);
+          break;
+        case InvoiceStatus.OVERDUE:
+          qb.andWhere('invoice.dueDate < :today', { today: todayIso })
+            .andWhere(`${balance} > 0`);
+          break;
+        case InvoiceStatus.PARTIALLY_PAID:
+          qb.andWhere('invoice.dueDate >= :today', { today: todayIso })
+            .andWhere('COALESCE(invoice.paidAmount, 0) > 0')
+            .andWhere(`${balance} > 0`);
+          break;
+        case InvoiceStatus.UNPAID:
+          qb.andWhere('invoice.dueDate >= :today', { today: todayIso })
+            .andWhere('COALESCE(invoice.paidAmount, 0) <= 0')
+            .andWhere(`${balance} > 0`);
+          break;
+      }
+    };
+
+    // Collected activity is dated by payment; open balances are dated by invoice creation.
     const paymentQb = this.paymentRepo.createQueryBuilder('payment')
-      .leftJoin('payment.invoice', 'invoice');
+      .innerJoin('payment.invoice', 'invoice');
 
     if (propertyId) {
       paymentQb.andWhere('invoice.propertyId = :propertyId', { propertyId });
     }
     if (start) {
-      paymentQb.andWhere('payment.createdAt >= :start', { start: start.toISOString() });
+      paymentQb.andWhere('payment.paymentDate >= :start', { start: start.toISOString() });
     }
     if (end) {
-      paymentQb.andWhere('payment.createdAt <= :end', { end: end.toISOString() });
+      paymentQb.andWhere('payment.paymentDate <= :end', { end: end.toISOString() });
     }
+    applyStatusFilter(paymentQb);
 
     const collectedRaw = await paymentQb.select('COALESCE(SUM(payment.amount), 0)', 'sum').getRawOne();
     const totalCollected = Number(collectedRaw?.sum || 0);
 
-    // Outstanding: sum of invoice balances for invoices not fully paid/voided
+    // Outstanding: sum of positive balances for invoices matching the selected filters.
     const invoiceQb = this.invoiceRepo.createQueryBuilder('invoice');
     if (propertyId) {
       invoiceQb.andWhere('invoice.propertyId = :propertyId', { propertyId });
@@ -192,16 +220,19 @@ export class BillingService {
       invoiceQb.andWhere('invoice.createdAt <= :end', { end: end.toISOString() });
     }
 
-    invoiceQb.andWhere('invoice.status NOT IN (:...excluded)', { excluded: [InvoiceStatus.PAID] });
+    invoiceQb.andWhere('(invoice.totalAmount - COALESCE(invoice.paidAmount, 0)) > 0');
+    applyStatusFilter(invoiceQb);
     const outstandingRaw = await invoiceQb.select('COALESCE(SUM(invoice.totalAmount - COALESCE(invoice.paidAmount, 0)), 0)', 'sum').getRawOne();
     const totalOutstanding = Number(outstandingRaw?.sum || 0);
 
-    // Overdue
-    const nowIso = new Date().toISOString();
+    // Overdue balances use the same invoice-period and payment-status filters.
     const overdueQb = this.invoiceRepo.createQueryBuilder('invoice');
     if (propertyId) overdueQb.andWhere('invoice.propertyId = :propertyId', { propertyId });
-    overdueQb.andWhere('invoice.dueDate < :now', { now: nowIso });
-    overdueQb.andWhere('invoice.status NOT IN (:...excluded)', { excluded: [InvoiceStatus.PAID] });
+    if (start) overdueQb.andWhere('invoice.createdAt >= :start', { start: start.toISOString() });
+    if (end) overdueQb.andWhere('invoice.createdAt <= :end', { end: end.toISOString() });
+    overdueQb.andWhere('invoice.dueDate < :today', { today: todayIso })
+      .andWhere('(invoice.totalAmount - COALESCE(invoice.paidAmount, 0)) > 0');
+    applyStatusFilter(overdueQb);
     const overdueRaw = await overdueQb.select('COALESCE(SUM(invoice.totalAmount - COALESCE(invoice.paidAmount, 0)), 0)', 'sum').getRawOne();
     const totalOverdue = Number(overdueRaw?.sum || 0);
 
@@ -209,22 +240,46 @@ export class BillingService {
     const breakdownQb = this.invoiceRepo.createQueryBuilder('invoice')
       .leftJoin('invoice.property', 'property')
       .select('property.id', 'propertyId')
-      .addSelect('COALESCE(SUM(invoice.paidAmount),0)', 'collected')
       .addSelect('COALESCE(SUM(invoice.totalAmount - COALESCE(invoice.paidAmount,0)),0)', 'outstanding')
-      .addSelect(`COALESCE(SUM(CASE WHEN invoice.dueDate < :now AND invoice.status NOT IN (:...excluded) THEN (invoice.totalAmount - COALESCE(invoice.paidAmount,0)) ELSE 0 END),0)`, 'overdue')
+      .addSelect(`COALESCE(SUM(CASE WHEN invoice.dueDate < :today AND (invoice.totalAmount - COALESCE(invoice.paidAmount,0)) > 0 THEN (invoice.totalAmount - COALESCE(invoice.paidAmount,0)) ELSE 0 END),0)`, 'overdue')
       .groupBy('property.id')
-      .setParameters({ now: nowIso, excluded: [InvoiceStatus.PAID] });
+      .setParameter('today', todayIso);
 
     if (propertyId) breakdownQb.andWhere('property.id = :propertyId', { propertyId });
     if (start) breakdownQb.andWhere('invoice.createdAt >= :start', { start: start.toISOString() });
     if (end) breakdownQb.andWhere('invoice.createdAt <= :end', { end: end.toISOString() });
+    breakdownQb.andWhere('(invoice.totalAmount - COALESCE(invoice.paidAmount, 0)) > 0');
+    applyStatusFilter(breakdownQb);
 
     const breakdownRaw = await breakdownQb.getRawMany();
-    const breakdown = breakdownRaw.map(r => ({
-      propertyId: r.propertyId,
-      collected: Number(r.collected || 0),
-      outstanding: Number(r.outstanding || 0),
-      overdue: Number(r.overdue || 0),
+    const paymentBreakdownQb = this.paymentRepo.createQueryBuilder('payment')
+      .innerJoin('payment.invoice', 'invoice')
+      .select('invoice.propertyId', 'propertyId')
+      .addSelect('COALESCE(SUM(payment.amount), 0)', 'collected')
+      .groupBy('invoice.propertyId');
+    if (propertyId) paymentBreakdownQb.andWhere('invoice.propertyId = :propertyId', { propertyId });
+    if (start) paymentBreakdownQb.andWhere('payment.paymentDate >= :start', { start: start.toISOString() });
+    if (end) paymentBreakdownQb.andWhere('payment.paymentDate <= :end', { end: end.toISOString() });
+    applyStatusFilter(paymentBreakdownQb);
+    const paymentBreakdownRaw = await paymentBreakdownQb.getRawMany();
+    const collectedByProperty = new Map(
+      paymentBreakdownRaw.map((row) => [row.propertyId, Number(row.collected || 0)]),
+    );
+    const breakdownByProperty = new Map(breakdownRaw.map((row) => [row.propertyId, row]));
+    for (const row of paymentBreakdownRaw) {
+      if (!breakdownByProperty.has(row.propertyId)) {
+        breakdownByProperty.set(row.propertyId, {
+          propertyId: row.propertyId,
+          outstanding: 0,
+          overdue: 0,
+        });
+      }
+    }
+    const breakdown = Array.from(breakdownByProperty.values()).map((row) => ({
+      propertyId: row.propertyId,
+      collected: collectedByProperty.get(row.propertyId) || 0,
+      outstanding: Number(row.outstanding || 0),
+      overdue: Number(row.overdue || 0),
     }));
 
     // Simple anomaly detection

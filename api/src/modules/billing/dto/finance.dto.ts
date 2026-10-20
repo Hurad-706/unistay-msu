@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO8601, IsIn, IsOptional, IsUUID } from 'class-validator';
+import { InvoiceStatus } from '../entities/invoice.entity';
 
 export class FinanceSummaryQueryDto {
   @ApiPropertyOptional({ description: 'Filter by property UUID' })
@@ -7,20 +8,23 @@ export class FinanceSummaryQueryDto {
   @IsUUID()
   propertyId?: string;
 
-  @ApiPropertyOptional({ description: 'Start date (inclusive) in ISO 8601' })
+  @ApiPropertyOptional({ description: 'Start date (inclusive); applies to payment dates for collected totals and invoice creation dates for balances' })
   @IsOptional()
   @IsISO8601()
   startDate?: string;
 
-  @ApiPropertyOptional({ description: 'End date (inclusive) in ISO 8601' })
+  @ApiPropertyOptional({ description: 'End date (inclusive); applies to payment dates for collected totals and invoice creation dates for balances' })
   @IsOptional()
   @IsISO8601()
   endDate?: string;
 
-  @ApiPropertyOptional({ description: "Which category to return: 'collected' | 'outstanding' | 'overdue' | 'all'", enum: ['collected','outstanding','overdue','all'] })
+  @ApiPropertyOptional({
+    description: 'Filter invoices by payment status',
+    enum: ['all', ...Object.values(InvoiceStatus)],
+  })
   @IsOptional()
-  @IsIn(['collected', 'outstanding', 'overdue', 'all'])
-  status?: 'collected' | 'outstanding' | 'overdue' | 'all';
+  @IsIn(['all', ...Object.values(InvoiceStatus)])
+  status?: InvoiceStatus | 'all';
 
   @ApiPropertyOptional({ description: 'Export format (background job available): csv | xlsx | pdf', enum: ['csv','xlsx','pdf'] })
   @IsOptional()
