@@ -25,11 +25,6 @@ export class FinanceSummaryQueryDto {
   @IsOptional()
   @IsIn(['all', ...Object.values(InvoiceStatus)])
   status?: InvoiceStatus | 'all';
-
-  @ApiPropertyOptional({ description: 'Export format (background job available): csv | xlsx | pdf', enum: ['csv','xlsx','pdf'] })
-  @IsOptional()
-  @IsIn(['csv','xlsx','pdf'])
-  export?: 'csv' | 'xlsx' | 'pdf';
 }
 
 export class FinanceSummaryByProperty {

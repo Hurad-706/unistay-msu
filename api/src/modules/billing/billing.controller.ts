@@ -18,7 +18,6 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { User } from '../users/entities/user.entity';
 import { FinanceSummaryQueryDto, FinanceSummaryResponseDto } from './dto/finance.dto';
-import { ExportJob } from './entities/export-job.entity';
 
 @ApiTags('Billing & Utility Splitting')
 @ApiBearerAuth()
@@ -81,20 +80,5 @@ export class BillingController {
   @ApiOperation({ summary: 'Admin financial summary: collected, outstanding, overdue with filters and anomalies' })
   async getFinancialSummary(@Query() query: FinanceSummaryQueryDto): Promise<FinanceSummaryResponseDto> {
     return this.billingService.getFinancialSummary(query);
-  }
-
-  // Create export job (background)
-  @Post('admin/summary/export')
-  @Roles(Role.PROPERTY_MANAGER, Role.UNIVERSITY_ADMIN)
-  @ApiOperation({ summary: 'Create background export job for finance summary' })
-  async createExport(@Body() query: FinanceSummaryQueryDto, @CurrentUser() user: User): Promise<ExportJob> {
-    return this.billingService.createExportJob(query, user);
-  }
-
-  @Get('admin/summary/export/:id')
-  @Roles(Role.PROPERTY_MANAGER, Role.UNIVERSITY_ADMIN)
-  @ApiOperation({ summary: 'Get export job status / download link when ready' })
-  async getExportStatus(@Param('id') id: string) {
-    return this.billingService.getExportJobStatus(id);
   }
 }

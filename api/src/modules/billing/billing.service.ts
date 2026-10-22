@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import { Invoice, InvoiceStatus, Payment } from './entities/invoice.entity';
@@ -7,25 +7,17 @@ import { UsersService } from '../users/users.service';
 import { HousingService } from '../housing/housing.service';
 import { User } from '../users/entities/user.entity';
 import { FinanceSummaryQueryDto, FinanceSummaryResponseDto } from './dto/finance.dto';
-import { ExportJob, ExportJobStatus } from './entities/export-job.entity';
-import { ConfigService } from '@nestjs/config';
-import * as Minio from 'minio';
 import { Role } from '../../common/enums/role.enum';
 
 @Injectable()
 export class BillingService {
-  private readonly logger = new Logger(BillingService.name);
-
   constructor(
     @InjectRepository(Invoice)
     private readonly invoiceRepo: Repository<Invoice>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
-    @InjectRepository(ExportJob)
-    private readonly exportJobRepo: Repository<ExportJob>,
     private readonly usersService: UsersService,
     private readonly housingService: HousingService,
-    private readonly configService: ConfigService,
   ) {}
 
   async findAllInvoices(userId?: string): Promise<Invoice[]> {
@@ -318,88 +310,5 @@ export class BillingService {
     };
 
     return response;
-  }
-
-  // Create a background export job and start processing asynchronously
-  async createExportJob(query: FinanceSummaryQueryDto, requestedBy?: User): Promise<ExportJob> {
-    const job = this.exportJobRepo.create({
-      type: 'finance_summary',
-      filters: query,
-      status: ExportJobStatus.PENDING,
-      format: query.export || 'csv',
-    });
-    const saved = await this.exportJobRepo.save(job);
-
-    // Kick off async processing (fire-and-forget)
-    this.processExportJob(saved).catch(err => {
-      this.logger.error('Failed to process export job', err);
-    });
-
-    return saved;
-  }
-
-  private async processExportJob(job: ExportJob) {
-    await this.exportJobRepo.update({ id: job.id }, { status: ExportJobStatus.PROCESSING });
-    try {
-      const summary = await this.getFinancialSummary(job.filters || {});
-
-      // Build CSV (simple): header + breakdown
-      const csv = this.buildCsvFromSummary(summary);
-      const objectKey = `exports/finance-summary-${job.id}.csv`;
-
-      // Upload to MinIO
-      const minioClient = this.getMinioClient();
-      const bucket = this.configService.get<string>('storage.bucketName') || process.env.MINIO_BUCKET_NAME || 'unistay-media';
-
-      // Ensure bucket exists (putObject will create implicitly in MinIO)
-      await minioClient.putObject(bucket, objectKey, Buffer.from(csv));
-
-      await this.exportJobRepo.update({ id: job.id }, { status: ExportJobStatus.COMPLETED, objectKey });
-    } catch (err) {
-      this.logger.error('Export job failed', err);
-      await this.exportJobRepo.update({ id: job.id }, { status: ExportJobStatus.FAILED, errorMessage: (err as Error).message });
-    }
-  }
-
-  private buildCsvFromSummary(summary: FinanceSummaryResponseDto): string {
-    const lines: string[] = [];
-    lines.push('Generated At,' + summary.generatedAt);
-    lines.push('Total Collected,' + summary.totalCollected.toFixed(2));
-    lines.push('Total Outstanding,' + summary.totalOutstanding.toFixed(2));
-    lines.push('Total Overdue,' + summary.totalOverdue.toFixed(2));
-    lines.push('');
-    lines.push('Property ID,Collected,Outstanding,Overdue');
-    for (const row of summary.breakdownByProperty) {
-      lines.push(`${row.propertyId},${row.collected.toFixed(2)},${row.outstanding.toFixed(2)},${row.overdue.toFixed(2)}`);
-    }
-    lines.push('');
-    lines.push('Anomalies');
-    lines.push('Type,Description,Severity');
-    for (const a of summary.anomalies) {
-      lines.push(`${a.type},"${(a.description || '').replace(/"/g, '""')}",${a.severity || 'low'}`);
-    }
-    return lines.join('\n');
-  }
-
-  private getMinioClient(): any {
-    const endpoint = this.configService.get<string>('storage.endPoint') || process.env.MINIO_ENDPOINT || 'localhost';
-    const port = Number(this.configService.get<number>('storage.port') || process.env.MINIO_PORT || 9000);
-    const useSSL = this.configService.get<boolean>('storage.useSSL') || (process.env.MINIO_USE_SSL === 'true');
-    const accessKey = this.configService.get<string>('storage.accessKey') || process.env.MINIO_ACCESS_KEY || process.env.MINIO_ROOT_USER || 'unistay_admin';
-    const secretKey = this.configService.get<string>('storage.secretKey') || process.env.MINIO_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || 'unistay_minio_secret_2026';
-
-    // Minio client (callback-based putObject supports Promise when omitted callback in newer SDKs)
-    const client = new Minio.Client({
-      endPoint: endpoint,
-      port,
-      useSSL,
-      accessKey,
-      secretKey,
-    });
-
-    // Wrap putObject to return a Promise if SDK uses callbacks — but minio.putObject returns Promise in modern versions
-    (client as any).putObject = (client as any).putObject.bind(client);
-
-    return client;
   }
 }
