@@ -4,10 +4,27 @@ export interface User {
   id: string;
   email: string;
   fullName: string;
+  nickName?: string;
+  studentIdNumber?: string;
+  college?: string;
+  course?: string;
+  phoneNumber?: string;
   role: UserRole;
   avatarUrl?: string;
   isInstitutionalVerified?: boolean;
 }
+
+export interface RegisterPayload {
+  email: string;
+  password: string;
+  fullName: string;
+  studentIdNumber?: string;
+  college?: string;
+  course?: string;
+  phoneNumber?: string;
+  nickName?: string;
+}
+
 
 export type PropertyType = 'institutional_dorm' | 'private_boarding_house';
 
@@ -106,6 +123,29 @@ export interface Invoice {
   utilitySplitNotes?: string;
   payments?: Payment[];
   createdAt: string;
+}
+
+export type FinancePaymentStatus = InvoiceStatus | 'all';
+
+export interface FinanceSummaryQuery {
+  propertyId?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: FinancePaymentStatus;
+}
+
+export interface FinanceSummary {
+  totalCollected: number;
+  totalOutstanding: number;
+  totalOverdue: number;
+  breakdownByProperty: Array<{
+    propertyId: string;
+    collected: number;
+    outstanding: number;
+    overdue: number;
+  }>;
+  generatedAt: string;
+  filters: FinanceSummaryQuery;
 }
 
 export type TicketCategory = 'plumbing' | 'electrical' | 'sanitation' | 'carpentry' | 'other';
