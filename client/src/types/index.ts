@@ -94,6 +94,29 @@ export interface Invoice {
   createdAt: string;
 }
 
+export type FinancePaymentStatus = InvoiceStatus | 'all';
+
+export interface FinanceSummaryQuery {
+  propertyId?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: FinancePaymentStatus;
+}
+
+export interface FinanceSummary {
+  totalCollected: number;
+  totalOutstanding: number;
+  totalOverdue: number;
+  breakdownByProperty: Array<{
+    propertyId: string;
+    collected: number;
+    outstanding: number;
+    overdue: number;
+  }>;
+  generatedAt: string;
+  filters: FinanceSummaryQuery;
+}
+
 export type TicketCategory = 'plumbing' | 'electrical' | 'sanitation' | 'carpentry' | 'other';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
